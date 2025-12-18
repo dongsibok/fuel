@@ -1,1 +1,420 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>영수증 목록 (Google Sheets 연동)</title>
+  <style>
+    @page {
+      size: A4;
+      margin-top: 20mm;
+      margin-left: 10mm;
+      margin-right: 10mm;
+      margin-bottom: 10mm;
+    }
+    html, body { height: 100%; margin: 0; padding: 0; }
+    body {
+      font-family: 'Noto Sans KR', -apple-system, BlinkMacSystemFont, sans-serif;
+      color: #333; line-height: 1.2; font-size: 0.9em; background: #f5f5f5;
+    }
+    .page {
+      width: 190mm; margin: 20px auto; display: flex; flex-direction: column;
+      min-height: calc(297mm - 40mm);
+      border: 1px solid #333; border-radius: 6px; padding: 8px; 
+      box-sizing: border-box; background: #fff;
+    }
+    h1 { 
+      text-align: center; margin: 10px 0 14px; font-size: 2em; 
+      letter-spacing: 0.1em; font-weight: 700; 
+    }
+    table { 
+      width: 100%; border-collapse: collapse; table-layout: fixed; 
+      margin: 0; page-break-inside: avoid; 
+    }
+    th, td { 
+      border: 1px solid #333; padding: 6px 8px; text-align: center; 
+      vertical-align: middle; min-height: 28px; word-break: break-word; 
+    }
+    th { background-color: #f2f2f2; font-weight: 700; }
+    .header-table { margin-bottom: 6px; }
+    .header-table td { 
+      font-weight: bold; text-align: center; width: 25%; 
+      background-color: #f2f2f2; 
+    }
+    .header-table .input-cell { 
+      width: 75%; font-weight: normal; background-color: white; 
+      text-align: center; 
+    }
+    .data-table.summary { margin: 0; border-bottom: none; }
+    .data-table.summary th, .data-table.summary td { width: 50%; }
+    .data-table.detail-table { margin: 0; border-top: none; }
+    .data-table.detail-table th, .data-table.detail-table td { width: 20%; }
+    input[type="text"], select, input[type="date"] {
+      width: 100%; box-sizing: border-box; border: 1px solid #ddd; 
+      outline: none; background-color: white; padding: 4px; margin: 0; 
+      font-size: 1em; text-align: center; border-radius: 3px;
+    }
+    input[type="text"]:focus, select:focus, input[type="date"]:focus {
+      border-color: #4a6da7;
+      box-shadow: 0 0 0 2px rgba(74, 109, 167, 0.1);
+    }
+    select { 
+      appearance: none; -webkit-appearance: none; -moz-appearance: none; 
+      text-align-last: center; cursor: pointer;
+    }
+    .print-button, .save-button, .clear-button {
+      display: inline-block; min-width: 120px; margin: 8px 6px; 
+      padding: 10px 16px; text-align: center; color: #fff; 
+      border: none; border-radius: 6px; cursor: pointer; 
+      font-size: 14px; font-weight: 600;
+      transition: all 0.2s;
+    }
+    .print-button { background-color: #4a6da7; }
+    .print-button:hover { background-color: #3a5d97; }
+    .save-button { background-color: #2f855a; }
+    .save-button:hover { background-color: #276749; }
+    .save-button:disabled { background-color: #9ca3af; cursor: not-allowed; }
+    .clear-button { background-color: #dc2626; }
+    .clear-button:hover { background-color: #b91c1c; }
+    .btn-row { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
+    .receipt-box { 
+      flex: 1 1 auto; border: 1px solid #333; border-radius: 4px; 
+      min-height: 90mm; box-sizing: border-box; margin-top: 0; 
+      background: #fff; page-break-inside: avoid; position: relative; 
+      padding: 4px; 
+    }
+    .transaction-date { 
+      position: absolute; top: 8px; left: 8px; font-size: 0.9em; 
+      font-weight: 600; display: flex; align-items: center; gap: 6px; 
+    }
+    .transaction-date label { white-space: nowrap; }
+    .toast {
+      position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+      background: rgba(0,0,0,0.85); color: #fff; padding: 12px 20px; 
+      border-radius: 6px; font-size: 14px; display: none; z-index: 1000;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    }
+    .required { color: #dc2626; margin-left: 2px; }
+    @media print {
+      body { background: #fff; }
+      .print-button, .save-button, .clear-button { display: none; }
+      .page { 
+        box-shadow: none; border: none; padding: 0; margin: 0; 
+        background: #fff; 
+      }
+      input[type="text"], select, input[type="date"] { 
+        border: none !important; background-color: transparent !important; 
+        box-shadow: none !important;
+      }
+    }
+  </style>
+</head>
+<body>
 
+  <div class="page">
+    <h1>영 수 증 목 록</h1>
+
+    <div class="btn-row">
+      <button class="print-button" onclick="window.print()">🖨️ 인쇄</button>
+      <button class="save-button" id="saveBtn">💾 Google 시트에 저장</button>
+      <button class="clear-button" onclick="clearForm()">🗑️ 초기화</button>
+    </div>
+
+    <table class="header-table">
+      <tbody>
+        <tr>
+          <td>기안명(상세내역)</td>
+          <td class="input-cell" colspan="4">차량유류비</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <table class="data-table summary">
+      <thead>
+        <tr>
+          <th>건수<span class="required">*</span></th>
+          <th>금액<span class="required">*</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><input type="text" id="countInput" onblur="formatCount(this)" placeholder="예) 12"></td>
+          <td><input type="text" id="amountInput" onblur="formatAmount(this)" placeholder="예) 350000"></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <table class="data-table detail-table">
+      <thead>
+        <tr>
+          <th>차종<span class="required">*</span></th>
+          <th>주유소</th>
+          <th>주유자</th>
+          <th>현재km</th>
+          <th>종전km</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <select id="carType" onchange="handleCarTypeChange()">
+              <option value="">선택</option>
+              <option value="신스파크">신스파크</option>
+              <option value="구스파크">구스파크</option>
+              <option value="레이">레이</option>
+              <option value="마사회스타렉스">마사회스타렉스</option>
+              <option value="리프트스타렉스">리프트스타렉스</option>
+              <option value="이카운티">이카운티</option>
+            </select>
+          </td>
+          <td>
+            <select id="gasStationSelect" onchange="handleGasStationChange()">
+              <option value="">선택</option>
+              <option value="열린주유소">열린주유소</option>
+              <option value="GS칼텍스">GS칼텍스</option>
+              <option value="SK에너지">SK에너지</option>
+              <option value="현대오일뱅크">현대오일뱅크</option>
+              <option value="S-OIL">S-OIL</option>
+              <option value="직접입력">📝 직접입력</option>
+            </select>
+            <input type="text" id="gasStationInput" placeholder="주유소명 입력" style="display:none;">
+          </td>
+          <td><input type="text" id="driver" placeholder="예) 홍길동"></td>
+          <td><input type="text" id="currentKm" placeholder="예) 28450"></td>
+          <td><input type="text" id="previousKm" placeholder="예) 27510"></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="receipt-box">
+      <div class="transaction-date">
+        <label for="transactionDate">거래일시<span class="required">*</span>:</label>
+        <input type="date" id="transactionDate">
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // ====== 차종별 주행거리 저장 ======
+    function saveKmData(carType, currentKm) {
+      if (!carType || !currentKm) return;
+      const data = getKmData();
+      data[carType] = currentKm;
+      localStorage.setItem('carKmData', JSON.stringify(data));
+    }
+
+    function getKmData() {
+      const stored = localStorage.getItem('carKmData');
+      return stored ? JSON.parse(stored) : {};
+    }
+
+    function loadPreviousKm(carType) {
+      if (!carType) return;
+      const data = getKmData();
+      const previousKm = data[carType];
+      
+      if (previousKm) {
+        document.getElementById('previousKm').value = previousKm;
+        showToast(`${carType}의 이전 주행거리가 자동 입력되었습니다`, true);
+      }
+    }
+
+    // ====== 차종 변경 핸들러 ======
+    function handleCarTypeChange() {
+      const carType = document.getElementById('carType').value;
+      loadPreviousKm(carType);
+    }
+
+    // ====== 주유소 선택 핸들러 ======
+    function handleGasStationChange() {
+      const select = document.getElementById('gasStationSelect');
+      const input = document.getElementById('gasStationInput');
+      
+      if (select.value === '직접입력') {
+        select.style.display = 'none';
+        input.style.display = 'block';
+        input.focus();
+        input.value = '';
+      }
+    }
+
+    // 직접입력 필드에서 포커스 잃으면 다시 선택으로 돌아가기
+    window.addEventListener('DOMContentLoaded', () => {
+      const input = document.getElementById('gasStationInput');
+      const select = document.getElementById('gasStationSelect');
+      
+      input.addEventListener('blur', () => {
+        if (!input.value.trim()) {
+          setTimeout(() => {
+            input.style.display = 'none';
+            select.style.display = 'block';
+            select.value = '';
+          }, 150);
+        }
+      });
+      
+      // 엔터키 입력 시 포커스 이동
+      input.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+          input.blur();
+        }
+      });
+    });
+
+    // ====== 페이지 로드 시 오늘 날짜 자동 입력 ======
+    window.addEventListener('DOMContentLoaded', () => {
+      const today = new Date().toISOString().split('T')[0];
+      document.getElementById('transactionDate').value = today;
+    });
+
+    // ====== UI Formatting ======
+    function formatCount(input) {
+      let value = (input.value || '').replace(/[^0-9]/g, '');
+      input.value = value ? Number(value) + "건" : "";
+    }
+    
+    function formatAmount(input) {
+      let raw = (input.value || '').replace(/[^0-9]/g, '');
+      input.value = raw ? "금" + Number(raw).toLocaleString('ko-KR') + "원" : "";
+    }
+
+    // ====== Google Apps Script Web App URL ======
+    const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwL79CpGJx4VsTIqEbxim53RS0b6AVvPfu2Qa5x1RwIl2rbyHWlHwPnjrjWhvKQ3s1zjg/exec";
+
+    // ====== Helpers ======
+    function stripNumberDecorations(str) {
+      if (!str) return "";
+      const digits = String(str).replace(/[^\d]/g, "");
+      return digits;
+    }
+
+    function showToast(message, ok=true) {
+      const toast = document.getElementById('toast');
+      toast.textContent = message;
+      toast.style.background = ok ? 'rgba(15,111,54,0.92)' : 'rgba(180,38,38,0.92)';
+      toast.style.display = 'block';
+      setTimeout(() => toast.style.display = 'none', 3000);
+    }
+
+    function clearForm() {
+      if (!confirm('입력한 내용을 모두 지우시겠습니까?')) return;
+      
+      document.getElementById('countInput').value = '';
+      document.getElementById('amountInput').value = '';
+      document.getElementById('carType').value = '';
+      
+      // 주유소 필드 초기화
+      const gasSelect = document.getElementById('gasStationSelect');
+      const gasInput = document.getElementById('gasStationInput');
+      gasSelect.value = '';
+      gasSelect.style.display = 'block';
+      gasInput.style.display = 'none';
+      gasInput.value = '';
+      
+      document.getElementById('driver').value = '';
+      document.getElementById('currentKm').value = '';
+      document.getElementById('previousKm').value = '';
+      
+      const today = new Date().toISOString().split('T')[0];
+      document.getElementById('transactionDate').value = today;
+      
+      showToast('폼이 초기화되었습니다', true);
+    }
+
+    // ====== Validation ======
+    function validateForm() {
+      const required = {
+        '거래일시': document.getElementById('transactionDate').value,
+        '차종': document.getElementById('carType').value,
+        '건수': stripNumberDecorations(document.getElementById('countInput').value),
+        '금액': stripNumberDecorations(document.getElementById('amountInput').value)
+      };
+
+      for (const [field, value] of Object.entries(required)) {
+        if (!value) {
+          showToast(`${field}을(를) 입력해주세요`, false);
+          return false;
+        }
+      }
+      return true;
+    }
+
+    // ====== Save Handler ======
+    async function saveToGoogleSheets() {
+      if (!validateForm()) return;
+
+      // 주유소 값 가져오기 (선택 또는 직접입력)
+      const gasSelect = document.getElementById('gasStationSelect');
+      const gasInput = document.getElementById('gasStationInput');
+      const gasStation = gasInput.style.display === 'none' 
+        ? gasSelect.value 
+        : gasInput.value;
+
+      const payload = {
+        날짜: document.getElementById('transactionDate').value || "",
+        차종: document.getElementById('carType').value || "",
+        주유소: gasStation || "",
+        주유자: document.getElementById('driver').value || "",
+        현재km: stripNumberDecorations(document.getElementById('currentKm').value),
+        종전km: stripNumberDecorations(document.getElementById('previousKm').value),
+        건수: stripNumberDecorations(document.getElementById('countInput').value),
+        금액: stripNumberDecorations(document.getElementById('amountInput').value)
+      };
+
+      const btn = document.getElementById('saveBtn');
+      btn.disabled = true; 
+      btn.textContent = '💾 저장 중...';
+
+      try {
+        if (!WEB_APP_URL || WEB_APP_URL.includes('YOUR_WEB_APP_URL_HERE')) {
+          throw new Error('먼저 WEB_APP_URL을 본인의 Apps Script 배포 주소로 바꿔주세요.');
+        }
+        
+        const res = await fetch(WEB_APP_URL, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        
+        // no-cors 모드에서는 응답을 확인할 수 없으므로 성공으로 간주
+        showToast('Google 시트에 저장되었습니다 ✅', true);
+        
+        // 저장 후 폼 초기화 옵션
+        setTimeout(() => {
+          if (confirm('저장이 완료되었습니다. 폼을 초기화하시겠습니까?')) {
+            // 현재km를 저장 후 초기화
+            const carType = document.getElementById('carType').value;
+            const currentKm = stripNumberDecorations(document.getElementById('currentKm').value);
+            
+            if (carType && currentKm) {
+              saveKmData(carType, currentKm);
+            }
+            
+            clearForm();
+          } else {
+            // 초기화하지 않아도 km 데이터는 저장
+            const carType = document.getElementById('carType').value;
+            const currentKm = stripNumberDecorations(document.getElementById('currentKm').value);
+            
+            if (carType && currentKm) {
+              saveKmData(carType, currentKm);
+            }
+          }
+        }, 500);
+        
+      } catch (e) {
+        console.error(e);
+        showToast('저장 실패: ' + e.message, false);
+      } finally {
+        btn.disabled = false; 
+        btn.textContent = '💾 Google 시트에 저장';
+      }
+    }
+
+    document.getElementById('saveBtn').addEventListener('click', saveToGoogleSheets);
+  </script>
+</body>
+</html>
